@@ -147,8 +147,8 @@ describe("repository hygiene", { skip: notAGitCheckout }, () => {
     assert.deepEqual(offences, [], `this repo must stand on its own:\n${offences.join("\n")}`);
   });
 
-  it("documents the repository in English only", () => {
-    const markdown = tracked.filter((file) => file.endsWith(".md"));
+  it("keeps canonical documentation in English and permits named Chinese translations", () => {
+    const markdown = tracked.filter((file) => file.endsWith(".md") && !file.endsWith(".zh-CN.md"));
     const vietnamese = /[àáâãèéêìíòóôõùúýăđĩũơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i;
     for (const file of markdown) {
       const text = fs.readFileSync(path.join(root, file), "utf8");

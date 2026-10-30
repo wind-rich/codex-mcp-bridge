@@ -1,6 +1,6 @@
 > **Windows Desktop Team extension:** this local fork adds opt-in WorkBuddy
 > Desktop task delegation alongside the upstream Codex/Claude Desktop bridge.
-> Start with [the Windows team guide](docs/desktop-team-windows.md).
+> Start with the Windows team guide: [English](docs/desktop-team-windows.md) · [简体中文](docs/desktop-team-windows.zh-CN.md).
 > WorkBuddy is experimental; protocol fixtures have been tested, but this
 > extension has not yet been accepted against real Windows desktop apps.
 

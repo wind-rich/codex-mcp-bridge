@@ -79,7 +79,12 @@ Nor may it carry instructions from somewhere the reader cannot open — a privat
 repository, or a personal rule, memory or skills file kept outside this
 project. Whatever a contributor has to obey belongs in this repo, in English.
 
-`test/repo-hygiene.test.mjs` enforces both, alongside the English-only rule.
+Canonical documentation remains in English. Explicitly requested Chinese
+translations may be added as `*.zh-CN.md`, linked to their English counterpart;
+navigation links may use the translated language name.
+
+`test/repo-hygiene.test.mjs` enforces repository hygiene and checks canonical
+documentation separately from these named translations.
 
 ## Releasing
 

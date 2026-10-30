@@ -1,5 +1,7 @@
 # Windows Desktop Team: Codex + Claude + WorkBuddy
 
+**English** · [简体中文](desktop-team-windows.zh-CN.md)
+
 This extension lets either **Codex Desktop** or **Claude Desktop's Code tab**
 act as manager, delegating work to the other app and to **existing WorkBuddy
 Desktop conversations**.
