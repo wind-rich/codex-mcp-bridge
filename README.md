@@ -1,3 +1,9 @@
+> **Windows Desktop Team extension:** this local fork adds opt-in WorkBuddy
+> Desktop task delegation alongside the upstream Codex/Claude Desktop bridge.
+> Start with [the Windows team guide](docs/desktop-team-windows.md).
+> WorkBuddy is experimental; protocol fixtures have been tested, but this
+> extension has not yet been accepted against real Windows desktop apps.
+
 <p align="center">
   <img src="assets/agent-pets.svg" width="240" height="220" alt="Claude, Codex, and Antigravity connected by curved two-way arrows" />
 </p>

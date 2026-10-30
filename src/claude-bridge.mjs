@@ -27,6 +27,7 @@ import { createHardenedRootPolicy } from "./hardened-root-policy.mjs";
 import { AGENT_PROMPT_GUIDANCE, PROMPT_FIELD_HINT } from "./prompt-guidance.mjs";
 import { registerProjectOnboardingTools } from "./project-onboarding-tools.mjs";
 import { discoverClaudeProject } from "./claude-project-discovery.mjs";
+import { registerWorkbuddyTools } from "./workbuddy-tools.mjs";
 
 exitForVersionRequest(import.meta.url);
 
@@ -67,6 +68,7 @@ const forwarding = {
 };
 
 const creationRootBindings = new Map();
+let workbuddy = null;
 
 const creations = new ClaudeSessionCreation({
   open: openClaudeCodeComposer,
@@ -115,7 +117,7 @@ const replyForwarder = new ReplyForwarder({
 
 const reload = createReloadControl({
   entry: "claude-bridge.mjs",
-  inspect: () => peer.reloadReason() ?? replyForwarder.reloadReason() ?? clientReloadReason(codex),
+  inspect: () => workbuddy?.active.size ? "WorkBuddy Desktop tasks are still being observed" : peer.reloadReason() ?? replyForwarder.reloadReason() ?? clientReloadReason(codex),
   quiesce: async () => { await peer.quiesce(); codex.close(); },
   exportState: () => ({ desktopOnly, peer: peer.exportReloadState(), forwarding: replyForwarder.exportReloadState(), threadId: forwarding.threadId, creations: creations.exportState(), creationRootBindings: [...creationRootBindings] }),
   restore: (state) => {
@@ -335,6 +337,19 @@ function registerTool(name, definition, handler) {
   return server.registerTool(name, definition, async (...args) => {
     try { return await reload.run(() => handler(...args)); }
     catch (error) { return failure(error); }
+  });
+}
+
+// Explicit opt-in keeps an undocumented Desktop protocol off the default path.
+if (process.env.WORKBUDDY_BRIDGE_ENABLED === "1") {
+  workbuddy = registerWorkbuddyTools(registerTool, {
+    sender: async meta => {
+      const sender = await assertSender(meta);
+      rootPolicy.assert(sender.cwd, "WorkBuddy sender project");
+      return sender;
+    },
+    assertCurrent: () => runtime.assertCurrent(),
+    desktopOnly,
   });
 }
 
@@ -814,7 +829,8 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 const shutdown = exitWhenClientCloses({
   prepare: () => peer.closeIntake(),
-  busy: () => peer.connections.size ? "Peer socket connections are still open"
+  busy: () => workbuddy?.active.size ? "WorkBuddy Desktop tasks are still being observed"
+    : peer.connections.size ? "Peer socket connections are still open"
     : peer.requestQueues.size ? "Claude messages are still being sent"
       : replyForwarder.forwardingReason(),
   stop: async () => { replyForwarder.close(); peer.stop(); codex.close(); await peer.closed; },

@@ -34,10 +34,12 @@ export function stdioMcpRegistration({ name, existing, node, entry, entryArgs = 
 
 export function codexMcpRegistration({ name, existing, node, entry, entryArgs = [], env, desktopOnly }) {
   const values = { ...existing?.transport?.env };
-  for (const key of ["CLAUDE_BRIDGE_PEER_NAME", "CLAUDE_BRIDGE_PERMISSION_MODE", "CODEX_BRIDGE_DESKTOP_TASKS", "CLAUDE_DESKTOP_USER_DATA", "CODEX_BRIDGE_PROJECT_POLICY"]) {
+  for (const key of ["CLAUDE_BRIDGE_PEER_NAME", "CLAUDE_BRIDGE_PERMISSION_MODE", "CODEX_BRIDGE_DESKTOP_TASKS", "CLAUDE_DESKTOP_USER_DATA", "CODEX_BRIDGE_PROJECT_POLICY", "WORKBUDDY_BRIDGE_ENABLED", "WORKBUDDY_PROFILE_DIR", "WORKBUDDY_BRIDGE_STATE_DIR", "CODEX_BRIDGE_TELEMETRY"]) {
     if (env[key] !== undefined) values[key] = env[key];
   }
   values.CODEX_BRIDGE_DESKTOP_TASKS ??= desktopOnly ? "1" : "0";
+  if (values.WORKBUDDY_BRIDGE_ENABLED !== undefined && !["0", "1"].includes(values.WORKBUDDY_BRIDGE_ENABLED)) throw new Error("WORKBUDDY_BRIDGE_ENABLED must be 0 or 1");
+  if (values.WORKBUDDY_BRIDGE_ENABLED === "1" && values.CODEX_BRIDGE_DESKTOP_TASKS !== "1") throw new Error("WorkBuddy requires Desktop-only mode; CLI fallback is not supported");
   if (!["0", "1"].includes(values.CODEX_BRIDGE_DESKTOP_TASKS)) throw new Error("CODEX_BRIDGE_DESKTOP_TASKS must be 0 or 1");
   if (values.CLAUDE_BRIDGE_PERMISSION_MODE !== undefined && !["bypass", "prompting"].includes(values.CLAUDE_BRIDGE_PERMISSION_MODE)) {
     throw new Error("CLAUDE_BRIDGE_PERMISSION_MODE must be bypass or prompting; never infer it from the recipient");
