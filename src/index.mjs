@@ -38,6 +38,7 @@ import { DesktopReplyReceipts } from "./desktop-reply-receipts.mjs";
 import { registerDesktopReadTools } from "./desktop-read-tools.mjs";
 import { PROJECT_SETUP_TOOLS, registerProjectOnboardingTools } from "./project-onboarding-tools.mjs";
 import { createRelayWake, relayKeeperEnabled, relayWakeStateFile, startRelayKeeper } from "./relay-wake.mjs";
+import { registerWorkbuddyTools } from "./workbuddy-tools.mjs";
 
 exitForVersionRequest(import.meta.url);
 
@@ -75,6 +76,7 @@ const security = new BridgeSecurityPolicy({
 const desktopTasksEnabled = desktopTasksConfigured();
 const runtime = createRuntimeState({ configuration: desktopTasksConfigured });
 const desktopOperation = new AsyncLocalStorage();
+let workbuddy = null;
 const replyReceipts = new DesktopReplyReceipts();
 const relayWake = createRelayWake({ senderCwd: () => desktopOperation.getStore()?.caller?.cwd ?? null, stateFile: relayWakeStateFile(), log });
 const desktopTasks = new DesktopTaskDelivery({ security, beforeRequest: beforeDesktopRequest, accountContext: () => desktopOperation.getStore()?.accounts, senderContext: () => desktopOperation.getStore()?.caller, wakeRelay: relayWake });
@@ -138,7 +140,7 @@ const client = desktopTasksEnabled ? null : new CodexAppServerClient({
 
 const reload = createReloadControl({
   entry: "index.mjs",
-  inspect: () => desktopTasks.threadOperations.size ? "Desktop task operations are still active" : clientReloadReason(client),
+  inspect: () => workbuddy?.active.size ? "WorkBuddy Desktop tasks are still being observed" : desktopTasks.threadOperations.size ? "Desktop task operations are still active" : clientReloadReason(client),
   quiesce: () => { client?.close(); },
   exportState: () => ({ desktopTasksEnabled, ownedThreadIds: [...security.ownedThreadIds] }),
   restore: (state) => {
@@ -464,6 +466,7 @@ function registerTool(name, definition, handler) {
     try {
       return await reload.run(async () => {
       if (!definition.annotations?.readOnlyHint) runtime.assertCurrent();
+      if (name === "workbuddy_bridge_status") return handler(...args);
       if (name === "codex_bridge_status") {
         const state = runtime.status();
         if (!state.current) return { ...failure(new Error(`${state.reason}; reconnect this MCP server in the existing task.`)), structuredContent: { runtime: state } };
@@ -507,6 +510,22 @@ function registerTool(name, definition, handler) {
     } catch (err) {
       return failure(err);
     }
+  });
+}
+
+if (process.env.WORKBUDDY_BRIDGE_ENABLED === "1") {
+  workbuddy = registerWorkbuddyTools(registerTool, {
+    provider: "claude",
+    desktopOnly: desktopTasksEnabled,
+    assertCurrent: () => runtime.assertCurrent(),
+    sender: async () => {
+      const context = desktopOperation.getStore();
+      if (!context?.caller) throw new Error("A verified Claude Desktop Code manager is required");
+      await assertDesktopOperation(context, { verifyProcess: true });
+      security.hardenedRoots.assert(context.caller.cwd, "WorkBuddy manager project");
+      return context.caller;
+    },
+    onDispatch: () => { desktopOperation.getStore().dispatched = true; },
   });
 }
 

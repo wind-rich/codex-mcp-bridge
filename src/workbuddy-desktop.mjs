@@ -14,6 +14,11 @@ const terminal = new Set(["completed", "error", "cancelled", "interrupted", "fai
 const busy = new Set(["in_progress", "streaming", "running", "pending", "queued"]);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (message, deliveryState = "not_sent") => Object.assign(new Error(message), { deliveryState });
+const manager = sender => {
+  const provider = sender.provider ?? "codex";
+  if (!["codex", "claude"].includes(provider)) throw fail("Unsupported Desktop manager");
+  return provider;
+};
 
 function uuid(value, label) {
   if (typeof value !== "string" || !UUID.test(value)) throw fail(`${label} must be a UUID`);
@@ -241,7 +246,7 @@ export class WorkbuddyDesktop {
   read(requestId, sender) {
     let record;
     try { record = readJson(this.file(requestId)); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
-    if (record.requestId !== requestId.toLowerCase() || record.senderId !== sender.threadId || !sameDirectory(record.cwd, sender.cwd)) throw fail("WorkBuddy receipt belongs to a different sending task or project");
+    if (record.requestId !== requestId.toLowerCase() || record.senderId !== sender.threadId || (record.senderProvider ?? "codex") !== manager(sender) || !sameDirectory(record.cwd, sender.cwd)) throw fail("WorkBuddy receipt belongs to a different sending task, manager or project");
     if (["pending", "submitted"].includes(record.status) && !this.active.has(record.requestId)) return { ...record, status: "unknown", reason: "The original observer is no longer running. Inspect the existing WorkBuddy conversation; this task will not be replayed." };
     return record;
   }
@@ -255,9 +260,15 @@ export class WorkbuddyDesktop {
   async dispatch({ requestId, sessionId, prompt }, sender, { beforeSend = async () => {} } = {}) {
     requestId = uuid(requestId, "requestId"); sessionId = uuid(sessionId, "sessionId");
     if (typeof prompt !== "string" || !prompt.trim() || Buffer.byteLength(prompt) > 60000) throw fail("Task prompt must contain 1 to 60000 UTF-8 bytes");
-    const digest = crypto.createHash("sha256").update(JSON.stringify([sessionId, sender.threadId, sender.cwd, prompt])).digest("hex");
+    const provider = manager(sender);
+    const digest = crypto.createHash("sha256").update(JSON.stringify([provider, sessionId, sender.threadId, sender.cwd, prompt])).digest("hex");
     const previous = this.read(requestId, sender);
-    if (previous) { if (previous.digest !== digest) throw fail("requestId was already used with a different task"); return previous; }
+    if (previous) {
+      const legacyDigest = provider === "codex" && previous.senderProvider === undefined
+        ? crypto.createHash("sha256").update(JSON.stringify([sessionId, sender.threadId, sender.cwd, prompt])).digest("hex") : null;
+      if (previous.digest !== digest && previous.digest !== legacyDigest) throw fail("requestId was already used with a different task");
+      return previous;
+    }
     const session = (await this.discover(sender.cwd)).find(row => row.sessionId === sessionId);
     if (!session) throw fail("The exact WorkBuddy interactive Desktop session is unavailable or ambiguous; open it in WorkBuddy");
     if (session.state !== "idle") throw fail(`WorkBuddy session is ${session.state}; wait for a confirmed idle state in its native conversation`);
@@ -266,7 +277,7 @@ export class WorkbuddyDesktop {
     const lock = this.lock(sessionId);
     try { fs.writeFileSync(lock, JSON.stringify({ requestId }), { flag: "wx", mode: 0o600 }); }
     catch (error) { if (error.code === "EEXIST") throw fail("A previous WorkBuddy delivery still owns this session; inspect its receipt before sending again"); throw error; }
-    const record = { requestId, sessionId, senderId: sender.threadId, cwd: session.cwd, digest, status: "pending", createdAt: new Date().toISOString(), independentReview: "required" };
+    const record = { requestId, sessionId, senderId: sender.threadId, senderProvider: provider, cwd: session.cwd, digest, status: "pending", createdAt: new Date().toISOString(), independentReview: "required" };
     try { fs.writeFileSync(this.file(requestId), JSON.stringify(record), { flag: "wx", mode: 0o600 }); }
     catch (error) { fs.unlinkSync(lock); throw error; }
     this.active.add(requestId);
@@ -288,7 +299,8 @@ export class WorkbuddyDesktop {
       const current = (await this.discover(session.cwd)).find(row => row.sessionId === session.sessionId);
       if (!current || current.identity !== session.identity || current.state !== "idle") throw fail("WorkBuddy worker identity or activity changed before submission");
       await beforeSend();
-      const text = `[Desktop team task ${record.requestId} from Codex ${record.senderId}. Collaborator task; native WorkBuddy permissions remain unchanged. Return evidence and a concise result. Completion still requires the Codex manager's independent review.]\n\n${prompt}`;
+      const label = record.senderProvider === "claude" ? "Claude" : "Codex";
+      const text = `[Desktop team task ${record.requestId} from ${label} ${record.senderId}. Collaborator task; native WorkBuddy permissions remain unchanged. Return evidence and a concise result. Completion still requires the ${label} manager's independent review.]\n\n${prompt}`;
       // Persist uncertainty BEFORE the one prompt write, including across crashes.
       record.status = "submitted"; this.save(record); submitted = true;
       Object.assign(record, await client.prompt(record.sessionId, text));

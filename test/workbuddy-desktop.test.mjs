@@ -218,10 +218,41 @@ it("saves explicit opt-in configuration and refuses WorkBuddy in CLI mode", () =
   assert.throws(() => codexMcpRegistration({ ...base, desktopOnly: false, env: { WORKBUDDY_BRIDGE_ENABLED: "1" } }), /Desktop-only/);
 });
 
-it("exposes the opt-in tools through the actual MCP process and rejects an unverified sender", async t => {
+it("lets Claude own WorkBuddy tasks without letting Codex take over a matching native id", async t => {
+  const f = fixture(t, { mode: "delayed" }); await f.ready;
+  const request = f.request(), claude = { ...f.sender, provider: "claude" };
+  await f.service.dispatch(request, claude);
+  assert.throws(() => f.service.read(request.requestId, f.sender), /different sending task/);
+  await assert.rejects(f.service.dispatch(f.request(), f.sender), /previous WorkBuddy delivery/);
+  const result = await settled(f.service, request.requestId, claude);
+  assert.equal(result.senderProvider, "claude");
+  assert.match(f.calls[1].params.prompt[0].text, /from Claude/);
+  assert.match(f.calls[1].params.prompt[0].text, /Claude manager/);
+});
+
+it("keeps old Codex receipts readable and idempotent after enabling manager selection", async t => {
+  const f = fixture(t); await f.ready; const request = f.request();
+  const digest = crypto.createHash("sha256").update(JSON.stringify([sessionId, senderId, f.cwd, request.prompt])).digest("hex");
+  fs.mkdirSync(f.directory);
+  fs.writeFileSync(f.service.file(request.requestId), JSON.stringify({ requestId: request.requestId, sessionId, senderId, cwd: f.cwd, digest, status: "completed", reply: "legacy" }));
+  assert.equal((await f.service.dispatch(request, f.sender)).reply, "legacy");
+  assert.deepEqual(f.calls, []);
+});
+
+it("normalizes a verified Claude Desktop session into a provider-scoped manager", async t => {
+  const f = fixture(t); await f.ready; const tools = new Map();
+  registerWorkbuddyTools((name, _definition, handler) => tools.set(name, handler), { service: f.service, provider: "claude", sender: async () => ({ sessionId: senderId, cwd: f.cwd }), assertCurrent: () => {} });
+  const request = f.request();
+  const receipt = await tools.get("send_to_workbuddy_session")(request, {});
+  assert.equal(receipt.structuredContent.senderProvider, "claude");
+  await settled(f.service, request.requestId, { ...f.sender, provider: "claude" });
+});
+
+for (const [entry, manager, counterpart] of [["claude-bridge.mjs", "codex", "send_to_claude_session"], ["index.mjs", "claude", "send_to_codex_thread"]]) {
+it(`exposes ${manager} manager tools through the actual MCP process and rejects an unverified sender`, async t => {
   const f = fixture(t); await f.ready;
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, "src", "claude-bridge.mjs")], stderr: "ignore", env: {
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, "src", entry)], stderr: "ignore", env: {
     PATH: process.env.PATH ?? "", SystemRoot: process.env.SystemRoot ?? "", HOME: f.root, USERPROFILE: f.root,
     APPDATA: path.join(f.root, "AppData", "Roaming"), LOCALAPPDATA: path.join(f.root, "AppData", "Local"),
     CODEX_HOME: path.join(f.root, ".codex"), CODEX_BRIDGE_AUTOSTART: "0", CODEX_BRIDGE_DESKTOP_TASKS: "1",
@@ -232,13 +263,15 @@ it("exposes the opt-in tools through the actual MCP process and rejects an unver
   try {
     await client.connect(transport);
     const names = (await client.listTools()).tools.map(tool => tool.name);
-    assert.ok(names.includes("send_to_claude_session"));
+    assert.ok(names.includes(counterpart));
     for (const name of ["workbuddy_bridge_status", "list_workbuddy_sessions", "send_to_workbuddy_session", "read_workbuddy_delivery"]) assert.ok(names.includes(name));
     const status = await client.callTool({ name: "workbuddy_bridge_status", arguments: {} });
     assert.equal(status.structuredContent.cliFallback, false);
+    assert.equal(status.structuredContent.manager, manager);
     const blocked = await client.callTool({ name: "send_to_workbuddy_session", arguments: f.request() });
     assert.equal(blocked.isError, true);
     assert.deepEqual(f.calls, []);
     assert.equal(fs.existsSync(f.directory), false);
   } finally { await client.close(); }
 });
+}

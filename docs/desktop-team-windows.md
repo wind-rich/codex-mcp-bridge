@@ -1,7 +1,8 @@
 # Windows Desktop Team: Codex + Claude + WorkBuddy
 
-This extension keeps Codex Desktop as the manager and delegates bounded work to
-**Claude Desktop's Code tab** and **existing WorkBuddy Desktop conversations**.
+This extension lets either **Codex Desktop** or **Claude Desktop's Code tab**
+act as manager, delegating work to the other app and to **existing WorkBuddy
+Desktop conversations**.
 The workers run in their own original apps and retain their native context,
 selected models and tool permissions. No independent AI CLI is substituted.
 
@@ -65,18 +66,38 @@ connection token which stays only in the transport client's memory.
 
 ## Install from this checkout
 
+Select a manager with `--manager codex`, `--manager claude` or `--manager both`:
+
+| Option | Manager | Workers |
+| --- | --- | --- |
+| `codex` (default) | Codex Desktop | Claude Desktop Code and WorkBuddy |
+| `claude` | Claude Desktop Code | Codex Desktop and WorkBuddy |
+| `both` | The native app where the user starts the task | The other app and WorkBuddy |
+
+With both enabled, start the request in Claude when you want Claude to lead;
+start it in Codex when you want Codex to lead. The installer enables WorkBuddy
+tools only in the selected manager(s) and configures one shared receipt/lock
+directory. Each receipt records both provider and native session ID, so a
+matching UUID in the other app cannot read or take over an existing task.
+Older Codex-only receipts remain readable by their original Codex manager.
+Rerun the installer and restart both apps to change the selection after current
+work finishes. In-flight tasks are not migrated. This configures entrypoints;
+it does not impose an OS-level role boundary on the desktop apps.
+
 In PowerShell, from the extracted/cloned repository:
 
 ```powershell
 npm.cmd ci --ignore-scripts --no-audit --no-fund
-node scripts/install-desktop-team.mjs --dry-run
-node scripts/install-desktop-team.mjs
+node scripts/install-desktop-team.mjs --manager both --dry-run
+node scripts/install-desktop-team.mjs --manager both
 ```
 
-The installer registers the existing native Codex relay and the Claude bridge,
-sets `CODEX_BRIDGE_DESKTOP_TASKS=1` and `WORKBUDDY_BRIDGE_ENABLED=1`, disables
-upstream usage telemetry for this registration, and installs the manager skill
-under `~/.agents/skills/desktop-team/`. Existing unrelated configuration and
+The installer registers the native Codex relay, the Codex-side Claude bridge,
+and Claude's user-level `codex-bridge` in `~/.claude.json`. It sets Desktop-only
+mode on both sides and enables WorkBuddy in the selected manager(s). It disables
+upstream usage telemetry for these registrations and installs the manager skill
+under `~/.agents/skills/desktop-team/` for Codex and/or
+`~/.claude/skills/desktop-team/` for Claude. Existing unrelated configuration and
 permissions remain under the upstream installer's preservation checks.
 It uses `--no-bootstrap` so installation does not start a separate app-server.
 It does not install/patch vendor apps, change approval modes, run a model test,
@@ -88,21 +109,27 @@ If you already use a custom profile:
 
 ```powershell
 $env:WORKBUDDY_PROFILE_DIR = 'C:\Path\To\WorkBuddyProfile'
-node scripts/install-desktop-team.mjs --dry-run
-node scripts/install-desktop-team.mjs
+node scripts/install-desktop-team.mjs --manager both --dry-run
+node scripts/install-desktop-team.mjs --manager both
 ```
 
-Restart Codex Desktop after active work finishes, so its task loads this
-checkout's bridge. Follow the upstream [Windows setup](new-windows-setup.md)
-for Claude-to-Codex reverse messaging if it is needed. Sending tasks from the
-Codex manager to Claude uses the Codex-side registration installed above.
+Restart both desktop apps after active work finishes so they load this
+checkout's bridges. Claude's local Code tab uses the user-level MCP entry.
+A pre-existing shared Desktop registration can shadow this entry; follow the
+upstream [Windows setup](new-windows-setup.md) if caller discovery stays blocked.
+Use `$desktop-team` in Codex or `/desktop-team` in Claude Code to start the
+manager workflow. With Claude as manager, use `codex_bridge_status`,
+`list_codex_threads`, `send_to_codex_thread` and `wait_codex_reply` for Codex
+workers; the four WorkBuddy tools are identical in either manager app.
 
 ## First local acceptance
 
-1. In the intended existing Codex project task, invoke `claude_bridge_status`
-   and `workbuddy_bridge_status`. Require the current bridge runtime and
+1. In the intended existing manager task, invoke `claude_bridge_status` from
+   Codex or `codex_bridge_status` from Claude. Invoke `workbuddy_bridge_status`
+   and verify its manager matches the selected app. Require the current runtime and
    Desktop-only mode. Tool discovery alone is not native acceptance.
-2. Invoke `list_claude_sessions` and `list_workbuddy_sessions`. Confirm that
+2. Invoke `list_claude_sessions` from Codex or `list_codex_threads` from Claude,
+   and `list_workbuddy_sessions`. Confirm that
    the returned native IDs and exact project directory match the intended
    windows. Open and finish a WorkBuddy turn if its entry is missing/unknown.
 3. Make one bounded read-only test: ask the chosen WorkBuddy session to reply
@@ -114,9 +141,9 @@ Codex manager to Claude uses the Codex-side registration installed above.
    window, the returned word matches, and the state is `completed`.
 5. Use the upstream Claude delivery tools for an equivalent bounded read-only
    test in the exact Desktop Code task. Confirm results in both native apps.
-6. Invoke `$desktop-team` in Codex and assign a real bounded task with clear
-   responsibilities, allowed files, acceptance criteria and evidence.
-   Codex independently checks the workers' actual changes and test results.
+6. Invoke `$desktop-team` in Codex or `/desktop-team` in Claude Code and assign
+   a bounded task with responsibilities, allowed files, acceptance criteria
+   and evidence. The selected manager independently checks the actual changes.
 
 WorkBuddy MCP tools are:
 
@@ -153,7 +180,7 @@ cancel native work. Native tool approval requests remain in WorkBuddy; this
 adapter does not grant them. Automatic completion notifications to an idle
 Codex chat, WorkBuddy cancellation, crash-resumed result observation,
 cross-account session verification, UI screenshots and closed-session
-activation are not implemented. The Codex MCP process must remain alive while
+activation are not implemented. The manager's MCP process must remain alive while
 observing. Upgrades wait for active observations; host shutdown can still end
 observation and leave an unknown receipt.
 
@@ -174,7 +201,8 @@ start the vendor desktop apps, spend model quota, or establish that this
 private protocol works with your installed WorkBuddy version. Real Windows 11
 acceptance of this new extension remains required.
 
-Validation performed on 2026-10-30 with Linux and Node 24.19.0:
+Initial Codex-manager validation on 2026-10-30 with Linux and Node 24.19.0,
+before the selectable-manager extension:
 
 - New desktop-team tests: **25 passed, 0 failed**. This includes an actual
   stdio MCP process, its tool inventory and refusal of an unverified sender.
@@ -195,3 +223,17 @@ To disable only the WorkBuddy extension, set
 `WORKBUDDY_BRIDGE_ENABLED=0` when running the existing
 `scripts/install-codex-mcp.mjs` installer, then reload the native bridge. Do not
 remove the shared relay or Claude registrations if they are still in use.
+
+Selectable-manager validation on 2026-10-30, Linux and Node 24.19.0:
+
+- **32 extension tests passed**, including both actual stdio MCP entrypoints,
+  manager-specific tool discovery, Claude-owned WorkBuddy tasks, cross-provider
+  receipt isolation, shared session locks, old Codex receipt compatibility,
+  manager selection and preservation of unrelated Claude configuration.
+- Full regression: **1,764 tests; 1,731 passed, 0 failed, 33 platform skips**,
+  in approximately 141 seconds, with the same test-only process reaping and
+  normal test umask described above. No tests were filtered or weakened.
+- `--manager both --dry-run`, syntax and whitespace checks passed.
+- Native Windows 11 acceptance for either manager still requires the installed
+  desktop apps and accounts. These automated tests do not establish live GUI
+  delivery or private-protocol compatibility with a particular app version.
